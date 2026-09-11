@@ -4,38 +4,12 @@
     var APP_ID = "YOUR_QOBUZ_APP_ID";
     var USER_TOKEN = localStorage.getItem("qobuz_token") || null;
 
-    // Авторизация
-    function qobuzLogin(username, password) {
-        return fetch("https://www.qobuz.com/api.json/0.2/user/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: "app_id=" + APP_ID + "&username=" + encodeURIComponent(username) + "&password=" + encodeURIComponent(password)
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.user && data.user.user_auth_token) {
-                USER_TOKEN = data.user.user_auth_token;
-                localStorage.setItem("qobuz_token", USER_TOKEN);
-                return USER_TOKEN;
-            } else {
-                throw new Error("Неверный логин или пароль");
-            }
-        });
-    }
-
-    // Воспроизведение трека
-    qobuz.play = function (trackId) {
-        return fetch("https://www.qobuz.com/api.json/0.2/track/get?track_id=" + trackId + "&app_id=" + APP_ID + "&user_auth_token=" + USER_TOKEN)
-            .then(r => r.json())
-            .then(track => track.stream_url);
-    };
-
-    // Основной UI
-    qobuz.main = function () {
+    // Основной компонент
+    qobuz.component = function () {
         var html = $('<div class="qobuz-plugin">\
             <div class="qobuz-header">\
                 <h2>Qobuz</h2>\
-                <p>Поиск, альбомы, плейлисты, избранное</p>\
+                <p>Поиск треков и альбомов</p>\
             </div>\
             <div class="qobuz-search">\
                 <input type="text" placeholder="Введите запрос...">\
@@ -55,7 +29,7 @@
                     var card = $('<div class="qobuz-item">\
                         <img src="' + item.cover + '" />\
                         <div class="title">' + item.title + '</div>\
-                        <button data-id="' + item.id + '" data-type="' + item.type + '">Play</button>\
+                        <button data-id="' + item.id + '">Play</button>\
                     </div>');
                     card.find('button').on('click', function () {
                         qobuz.play(item.id).then(url => {
@@ -80,18 +54,27 @@
                     results = data.tracks.items.map(track => ({
                         title: track.title,
                         cover: track.album.image.large,
-                        id: track.id,
-                        type: 'track'
+                        id: track.id
                     }));
                 }
                 return results;
             });
     };
 
+    // Воспроизведение
+    qobuz.play = function (trackId) {
+        return fetch("https://www.qobuz.com/api.json/0.2/track/get?track_id=" + trackId + "&app_id=" + APP_ID + "&user_auth_token=" + USER_TOKEN)
+            .then(r => r.json())
+            .then(track => track.stream_url);
+    };
+
     // Регистрация плагина в меню Lampa
     Lampa.Plugin.add({
         title: 'Qobuz',
         icon: 'music',
-        component: qobuz.main
+        component: qobuz.component,
+        onStart: function () {
+            console.log("Qobuz плагин загружен");
+        }
     });
 })();
