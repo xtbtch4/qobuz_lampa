@@ -1,28 +1,35 @@
 (function () {
     "use strict";
 
-    // qobuz-lampa.js — загружается с GitHub
-    // Убедись, что extensions.json указывает на raw URL этого файла
+    // qobuz-lampa.js — адаптирован под структуру рабочего плагина tpb-adult-lampa.js
+    // Помести raw URL этого файла в extensions.json Lampa.
+    // Заменить YOUR_QOBUZ_APP_ID на реальный app_id Qobuz перед использованием API.
 
     var Q = {};
-    var APP_ID = ""; // <-- Вставь сюда свой Qobuz APP_ID
+    var APP_ID = "YOUR_QOBUZ_APP_ID";
     var USER_TOKEN = localStorage.getItem("qobuz_token") || null;
 
-    // --- UI компонент (возвращает jQuery элемент) ---
+    // Вспомогательные логи
+    function log() {
+        try { console.log.apply(console, arguments); } catch (e) {}
+    }
+
+    // --- UI: компонент, возвращает jQuery элемент ---
     Q.component = function () {
         var html = $(
             '<div class="qobuz-plugin" style="padding:16px;color:#fff;">' +
-                '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+                '<div class="qobuz-header" style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
                     '<div style="width:44px;height:44px;background:#2b2b2b;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;">Q</div>' +
                     '<div>' +
                         '<div style="font-size:16px;font-weight:600;">Qobuz</div>' +
                         '<div style="font-size:12px;color:#9a9a9a;">Поиск, альбомы, плейлисты, избранное</div>' +
                     '</div>' +
                 '</div>' +
-                '<div style="margin-bottom:10px;">' +
+                '<div class="qobuz-controls" style="margin-bottom:12px;">' +
                     '<input class="qobuz-input" type="text" placeholder="Поиск треков или альбомов" style="width:60%;padding:8px;border-radius:4px;border:1px solid #333;background:#111;color:#fff;">' +
                     '<button class="qobuz-search-btn" style="margin-left:8px;padding:8px 12px;border-radius:4px;">Искать</button>' +
                     '<button class="qobuz-login-btn" style="margin-left:8px;padding:8px 12px;border-radius:4px;">Войти</button>' +
+                    '<button class="qobuz-logout-btn" style="margin-left:8px;padding:8px 12px;border-radius:4px;display:none;">Выйти</button>' +
                 '</div>' +
                 '<div class="qobuz-status" style="margin-bottom:8px;color:#f0f0f0;font-size:13px;"></div>' +
                 '<div class="qobuz-results"></div>' +
@@ -32,9 +39,18 @@
         var input = html.find('.qobuz-input');
         var btnSearch = html.find('.qobuz-search-btn');
         var btnLogin = html.find('.qobuz-login-btn');
+        var btnLogout = html.find('.qobuz-logout-btn');
         var status = html.find('.qobuz-status');
         var results = html.find('.qobuz-results');
 
+        // Отобразим кнопку выхода, если токен есть
+        if (USER_TOKEN) {
+            btnLogin.hide();
+            btnLogout.show();
+            status.text('Вход выполнен.');
+        }
+
+        // Поиск — выполняется только по клику
         btnSearch.on('click', function () {
             var q = input.val().trim();
             if (!q) {
@@ -51,19 +67,19 @@
                 }
                 list.forEach(function (item) {
                     var card = $(
-                        '<div style="display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #222;">' +
+                        '<div class="qobuz-item" style="display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #222;">' +
                             '<img src="' + (item.cover || '') + '" style="width:48px;height:48px;object-fit:cover;border-radius:4px;">' +
                             '<div style="flex:1;">' +
                                 '<div style="font-size:14px;color:#fff;">' + (item.title || '—') + '</div>' +
                                 '<div style="font-size:12px;color:#999;">' + (item.artist || '') + '</div>' +
                             '</div>' +
                             '<div>' +
-                                '<button class="play" data-id="' + item.id + '" style="padding:6px 10px;border-radius:4px;">Play</button>' +
+                                '<button class="qobuz-play-btn" data-id="' + item.id + '" style="padding:6px 10px;border-radius:4px;">Play</button>' +
                             '</div>' +
                         '</div>'
                     );
 
-                    card.find('.play').on('click', function () {
+                    card.find('.qobuz-play-btn').on('click', function () {
                         var id = $(this).data('id');
                         status.text('Подготовка трека...');
                         Q.play(id).then(function (url) {
@@ -88,6 +104,7 @@
             });
         });
 
+        // Лёгкая форма логина через prompt (минимум UI)
         btnLogin.on('click', function () {
             var email = prompt('Email Qobuz:');
             if (!email) return;
@@ -96,19 +113,27 @@
             status.text('Вход...');
             Q.login(email, pass).then(function (token) {
                 status.text('Вход выполнен.');
+                btnLogin.hide();
+                btnLogout.show();
             }).catch(function (err) {
                 status.text('Ошибка входа. Смотри консоль.');
                 console.error('Qobuz login error', err);
             });
         });
 
+        btnLogout.on('click', function () {
+            USER_TOKEN = null;
+            localStorage.removeItem('qobuz_token');
+            btnLogout.hide();
+            btnLogin.show();
+            status.text('Вы вышли.');
+        });
+
         return html;
     };
 
     // --- API-обёртки (выполняются только по действию) ---
-    // Пока заглушки: если APP_ID пустой — возвращают безопасные значения.
-    // Реализуй Q.apiSearch / Q.apiLogin / Q.apiGetTrackStream при готовности.
-
+    // Если APP_ID пустой — функции возвращают безопасные значения (чтобы не ломать загрузку).
     Q.search = function (query) {
         return new Promise(function (resolve, reject) {
             if (!APP_ID) {
@@ -133,7 +158,7 @@
     Q.login = function (email, password) {
         return new Promise(function (resolve, reject) {
             if (!APP_ID) {
-                reject(new Error('APP_ID не задан. Установи APP_ID для работы с Qobuz API.'));
+                reject(new Error('APP_ID не задан. Установи YOUR_QOBUZ_APP_ID.'));
                 return;
             }
             Q.apiLogin(email, password).then(function (token) {
@@ -144,151 +169,96 @@
         });
     };
 
-    // --- Заглушки для реальных вызовов (здесь вставь fetch к Qobuz API) ---
+    // --- Заглушки для реальных вызовов (реализуй при готовности) ---
     Q.apiSearch = function (query) {
-        // Пример: реализуй fetch к Qobuz API и верни массив {id, title, artist, cover}
+        // Пример реализации:
+        // return fetch("https://www.qobuz.com/api.json/0.2/search?query=" + encodeURIComponent(query) + "&app_id=" + APP_ID)
+        //   .then(r => r.json())
+        //   .then(data => { /* преобразовать в массив {id,title,artist,cover} */ });
         return Promise.resolve([]);
     };
 
     Q.apiLogin = function (email, password) {
-        // Пример: POST /user/login -> вернуть user_auth_token
-        return Promise.reject(new Error('Не реализовано: Q.apiLogin'));
+        // Пример реализации:
+        // return fetch("https://www.qobuz.com/api.json/0.2/user/login", { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: "app_id="+APP_ID+"&username="+encodeURIComponent(email)+"&password="+encodeURIComponent(password) })
+        //   .then(r=>r.json()).then(data=>data.user.user_auth_token);
+        return Promise.reject(new Error('Q.apiLogin не реализован'));
     };
 
     Q.apiGetTrackStream = function (trackId) {
-        // Пример: GET /track/get -> вернуть stream_url
+        // Пример реализации:
+        // return fetch("https://www.qobuz.com/api.json/0.2/track/get?track_id="+trackId+"&app_id="+APP_ID+"&user_auth_token="+USER_TOKEN)
+        //   .then(r=>r.json()).then(t=>t.stream_url);
         return Promise.resolve(null);
     };
 
-    // --- Регистрация плагина в Lampa (несколько попыток) ---
+    // --- Регистрация плагина (как в рабочем примере) ---
     function registerPlugin() {
-        var registered = false;
-
         try {
             if (typeof Lampa !== 'undefined' && Lampa.Plugin && typeof Lampa.Plugin.add === 'function') {
                 Lampa.Plugin.add({
                     title: 'Qobuz',
                     icon: 'music',
                     component: Q.component,
-                    onStart: function () { console.log('Qobuz onStart via Plugin.add'); }
+                    onStart: function () {
+                        log('Qobuz onStart');
+                    }
                 });
-                console.log('Qobuz registered via Lampa.Plugin.add');
-                registered = true;
+                log('Qobuz registered via Lampa.Plugin.add');
+                return true;
             }
         } catch (e) {
             console.error('Qobuz Plugin.add failed', e);
         }
+        return false;
+    }
 
+    // --- DOM-фолбек (если регистрация не сработала) ---
+    function domFallback() {
         try {
-            if (!registered && typeof Lampa !== 'undefined' && Lampa.Menu && typeof Lampa.Menu.add === 'function') {
-                Lampa.Menu.add({
-                    title: 'Qobuz',
-                    icon: 'music',
-                    component: Q.component
-                });
-                console.log('Qobuz registered via Lampa.Menu.add');
-                registered = true;
-            }
-        } catch (e) {
-            console.error('Qobuz Menu.add failed', e);
-        }
+            var menu = document.querySelector('.sidebar, .menu, .left, .menu-list, .sidebar__list');
+            var content = document.querySelector('.content, .main, #content, .app, .page');
+            if (!menu) { log('Qobuz fallback: menu not found'); return; }
 
-        try {
-            if (!registered && typeof Lampa !== 'undefined' && Lampa.Component && typeof Lampa.Component.add === 'function') {
-                Lampa.Component.add('qobuz', Q.component);
-                console.log('Qobuz registered via Lampa.Component.add');
-                registered = true;
-            }
-        } catch (e) {
-            console.error('Qobuz Component.add failed', e);
-        }
+            var btn = document.createElement('div');
+            btn.className = 'qobuz-fallback-btn';
+            btn.style.cssText = 'cursor:pointer;padding:10px;color:#fff;display:flex;align-items:center;gap:8px';
+            btn.innerHTML = '<span style="width:28px;height:28px;background:#2b2b2b;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;">Q</span><span>Qobuz</span>';
+            menu.appendChild(btn);
 
-        // Если ни один из API не сработал — добавим запасной пункт в DOM
-        if (!registered) {
-            console.warn('Qobuz: стандартная регистрация не сработала — применяю DOM-фолбек');
-            addDomFallback();
+            btn.addEventListener('click', function () {
+                var comp = Q.component();
+                if (content) {
+                    content.innerHTML = '';
+                    content.appendChild(comp.get(0));
+                } else {
+                    document.body.appendChild(comp.get(0));
+                }
+            });
+
+            log('Qobuz fallback button added to DOM');
+        } catch (e) {
+            console.error('Qobuz domFallback error', e);
         }
     }
 
-    // --- Запасной способ: добавить пункт в боковую панель вручную и открыть компонент в основном контейнере ---
-    function addDomFallback() {
-        try {
-            // Найти возможные контейнеры меню и контента
-            var menuSelectors = ['.sidebar', '.menu', '.left', '.menu-list', '.sidebar__list'];
-            var contentSelectors = ['.content', '.main', '#content', '.app', '.page'];
-
-            var menuEl = null;
-            for (var i = 0; i < menuSelectors.length; i++) {
-                var el = document.querySelector(menuSelectors[i]);
-                if (el) { menuEl = el; break; }
-            }
-
-            var contentEl = null;
-            for (var j = 0; j < contentSelectors.length; j++) {
-                var el2 = document.querySelector(contentSelectors[j]);
-                if (el2) { contentEl = el2; break; }
-            }
-
-            // Если меню найдено — добавляем кнопку
-            if (menuEl) {
-                var btn = document.createElement('div');
-                btn.className = 'qobuz-fallback-btn';
-                btn.style.cssText = 'cursor:pointer;padding:10px;color:#fff;display:flex;align-items:center;gap:8px';
-                btn.innerHTML = '<span style="width:28px;height:28px;background:#2b2b2b;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;">Q</span><span>Qobuz</span>';
-                menuEl.appendChild(btn);
-
-                btn.addEventListener('click', function () {
-                    openFallbackComponent(contentEl);
-                });
-
-                console.log('Qobuz: добавлена кнопка в DOM меню (фолбек).');
-            } else {
-                console.warn('Qobuz: не найден контейнер меню для DOM-фолбека.');
-            }
-        } catch (e) {
-            console.error('Qobuz DOM fallback error', e);
-        }
-    }
-
-    function openFallbackComponent(contentEl) {
-        try {
-            var comp = Q.component();
-            if (contentEl) {
-                // Очистим и вставим
-                contentEl.innerHTML = '';
-                contentEl.appendChild(comp.get(0));
-            } else {
-                // Если не найден content, вставим в body
-                document.body.appendChild(comp.get(0));
-            }
-        } catch (e) {
-            console.error('Qobuz openFallbackComponent error', e);
-        }
-    }
-
-    // Ждём, пока Lampa и DOM инициализируются — пробуем зарегистрировать несколько раз
+    // Попытка регистрации с ожиданием Lampa
     var attempts = 0;
     var maxAttempts = 20;
     var interval = setInterval(function () {
         attempts++;
         if (typeof Lampa !== 'undefined') {
             clearInterval(interval);
-            try {
-                registerPlugin();
-            } catch (e) {
-                console.error('Qobuz registerPlugin error', e);
-                addDomFallback();
-            }
+            var ok = registerPlugin();
+            if (!ok) domFallback();
             return;
         }
         if (attempts >= maxAttempts) {
             clearInterval(interval);
-            // Lampa не определён — делаем DOM-фолбек
-            addDomFallback();
+            domFallback();
         }
-    }, 300);
+    }, 250);
 
-    // Лог для быстрой отладки
-    console.log('qobuz-lampa.js loaded; APP_ID set:', !!APP_ID, 'USER_TOKEN present:', !!USER_TOKEN);
+    log('qobuz-lampa.js loaded; APP_ID set:', !!APP_ID, 'USER_TOKEN present:', !!USER_TOKEN);
 
 })();
