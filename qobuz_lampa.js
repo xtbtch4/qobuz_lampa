@@ -1,15 +1,14 @@
 (function () {
     "use strict";
 
-    // ФАЙЛ: qobuz-lampa.js
-    // Поместить в папку plugins и добавить в extensions.json
-    // Этот плагин безопасен при загрузке: сетевые вызовы выполняются только по клику.
+    // qobuz-lampa.js — загружается с GitHub
+    // Убедись, что extensions.json указывает на raw URL этого файла
 
     var Q = {};
-    var APP_ID = ""; // Установи позже, пока можно оставить пустым
+    var APP_ID = ""; // <-- Вставь сюда свой Qobuz APP_ID
     var USER_TOKEN = localStorage.getItem("qobuz_token") || null;
 
-    // Компонент возвращает jQuery элемент
+    // --- UI компонент (возвращает jQuery элемент) ---
     Q.component = function () {
         var html = $(
             '<div class="qobuz-plugin" style="padding:16px;color:#fff;">' +
@@ -106,16 +105,18 @@
         return html;
     };
 
-    // Заглушки и безопасные реализации
+    // --- API-обёртки (выполняются только по действию) ---
+    // Пока заглушки: если APP_ID пустой — возвращают безопасные значения.
+    // Реализуй Q.apiSearch / Q.apiLogin / Q.apiGetTrackStream при готовности.
+
     Q.search = function (query) {
         return new Promise(function (resolve, reject) {
             if (!APP_ID) {
-                // Для теста возвращаем пустой массив, чтобы UI работал
+                // тестовый режим — пустой результат
                 resolve([]);
                 return;
             }
-            // Реальная реализация должна быть здесь
-            resolve([]);
+            Q.apiSearch(query).then(resolve).catch(reject);
         });
     };
 
@@ -125,7 +126,7 @@
                 resolve(null);
                 return;
             }
-            resolve(null);
+            Q.apiGetTrackStream(trackId).then(resolve).catch(reject);
         });
     };
 
@@ -135,12 +136,32 @@
                 reject(new Error('APP_ID не задан. Установи APP_ID для работы с Qobuz API.'));
                 return;
             }
-            reject(new Error('Не реализовано: логин в Qobuz.'));
+            Q.apiLogin(email, password).then(function (token) {
+                USER_TOKEN = token;
+                localStorage.setItem('qobuz_token', token);
+                resolve(token);
+            }).catch(reject);
         });
     };
 
-    // Попытка регистрации плагина несколькими способами
-    function tryRegister() {
+    // --- Заглушки для реальных вызовов (здесь вставь fetch к Qobuz API) ---
+    Q.apiSearch = function (query) {
+        // Пример: реализуй fetch к Qobuz API и верни массив {id, title, artist, cover}
+        return Promise.resolve([]);
+    };
+
+    Q.apiLogin = function (email, password) {
+        // Пример: POST /user/login -> вернуть user_auth_token
+        return Promise.reject(new Error('Не реализовано: Q.apiLogin'));
+    };
+
+    Q.apiGetTrackStream = function (trackId) {
+        // Пример: GET /track/get -> вернуть stream_url
+        return Promise.resolve(null);
+    };
+
+    // --- Регистрация плагина в Lampa (несколько попыток) ---
+    function registerPlugin() {
         var registered = false;
 
         try {
@@ -151,11 +172,11 @@
                     component: Q.component,
                     onStart: function () { console.log('Qobuz onStart via Plugin.add'); }
                 });
-                console.log('Qobuz plugin registered via Lampa.Plugin.add');
+                console.log('Qobuz registered via Lampa.Plugin.add');
                 registered = true;
             }
         } catch (e) {
-            console.error('Plugin.add failed', e);
+            console.error('Qobuz Plugin.add failed', e);
         }
 
         try {
@@ -165,32 +186,109 @@
                     icon: 'music',
                     component: Q.component
                 });
-                console.log('Qobuz plugin registered via Lampa.Menu.add');
+                console.log('Qobuz registered via Lampa.Menu.add');
                 registered = true;
             }
         } catch (e) {
-            console.error('Menu.add failed', e);
+            console.error('Qobuz Menu.add failed', e);
         }
 
         try {
-            if (!registered && typeof Lampa !== 'undefined' && typeof Lampa.Component === 'object' && typeof Lampa.Component.add === 'function') {
+            if (!registered && typeof Lampa !== 'undefined' && Lampa.Component && typeof Lampa.Component.add === 'function') {
                 Lampa.Component.add('qobuz', Q.component);
-                console.log('Qobuz plugin registered via Lampa.Component.add');
+                console.log('Qobuz registered via Lampa.Component.add');
                 registered = true;
             }
         } catch (e) {
-            console.error('Component.add failed', e);
+            console.error('Qobuz Component.add failed', e);
         }
 
+        // Если ни один из API не сработал — добавим запасной пункт в DOM
         if (!registered) {
-            console.warn('Qobuz plugin registration did not match known Lampa APIs. Check Lampa version and example plugin structure.');
-        } else {
-            console.log('Qobuz plugin load attempt finished');
+            console.warn('Qobuz: стандартная регистрация не сработала — применяю DOM-фолбек');
+            addDomFallback();
         }
     }
 
-    // Выполнить регистрацию после небольшой задержки, чтобы Lampa успела инициализироваться
-    setTimeout(tryRegister, 200);
+    // --- Запасной способ: добавить пункт в боковую панель вручную и открыть компонент в основном контейнере ---
+    function addDomFallback() {
+        try {
+            // Найти возможные контейнеры меню и контента
+            var menuSelectors = ['.sidebar', '.menu', '.left', '.menu-list', '.sidebar__list'];
+            var contentSelectors = ['.content', '.main', '#content', '.app', '.page'];
+
+            var menuEl = null;
+            for (var i = 0; i < menuSelectors.length; i++) {
+                var el = document.querySelector(menuSelectors[i]);
+                if (el) { menuEl = el; break; }
+            }
+
+            var contentEl = null;
+            for (var j = 0; j < contentSelectors.length; j++) {
+                var el2 = document.querySelector(contentSelectors[j]);
+                if (el2) { contentEl = el2; break; }
+            }
+
+            // Если меню найдено — добавляем кнопку
+            if (menuEl) {
+                var btn = document.createElement('div');
+                btn.className = 'qobuz-fallback-btn';
+                btn.style.cssText = 'cursor:pointer;padding:10px;color:#fff;display:flex;align-items:center;gap:8px';
+                btn.innerHTML = '<span style="width:28px;height:28px;background:#2b2b2b;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;">Q</span><span>Qobuz</span>';
+                menuEl.appendChild(btn);
+
+                btn.addEventListener('click', function () {
+                    openFallbackComponent(contentEl);
+                });
+
+                console.log('Qobuz: добавлена кнопка в DOM меню (фолбек).');
+            } else {
+                console.warn('Qobuz: не найден контейнер меню для DOM-фолбека.');
+            }
+        } catch (e) {
+            console.error('Qobuz DOM fallback error', e);
+        }
+    }
+
+    function openFallbackComponent(contentEl) {
+        try {
+            var comp = Q.component();
+            if (contentEl) {
+                // Очистим и вставим
+                contentEl.innerHTML = '';
+                contentEl.appendChild(comp.get(0));
+            } else {
+                // Если не найден content, вставим в body
+                document.body.appendChild(comp.get(0));
+            }
+        } catch (e) {
+            console.error('Qobuz openFallbackComponent error', e);
+        }
+    }
+
+    // Ждём, пока Lampa и DOM инициализируются — пробуем зарегистрировать несколько раз
+    var attempts = 0;
+    var maxAttempts = 20;
+    var interval = setInterval(function () {
+        attempts++;
+        if (typeof Lampa !== 'undefined') {
+            clearInterval(interval);
+            try {
+                registerPlugin();
+            } catch (e) {
+                console.error('Qobuz registerPlugin error', e);
+                addDomFallback();
+            }
+            return;
+        }
+        if (attempts >= maxAttempts) {
+            clearInterval(interval);
+            // Lampa не определён — делаем DOM-фолбек
+            addDomFallback();
+        }
+    }, 300);
+
+    // Лог для быстрой отладки
+    console.log('qobuz-lampa.js loaded; APP_ID set:', !!APP_ID, 'USER_TOKEN present:', !!USER_TOKEN);
 
 })();
-                    
