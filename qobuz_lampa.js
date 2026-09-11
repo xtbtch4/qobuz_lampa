@@ -1,278 +1,299 @@
 /*!
- * Qobuz for Lampa — v0.1.0
- * Catalog/search/player shell for Lampa 3.x.
- *
- * IMPORTANT:
- * Qobuz stream URLs require valid Qobuz authentication/API access.
- * This plugin deliberately does not embed private Qobuz credentials or bypass DRM.
+ * Qobuz for Lampa — v0.1.1
+ * Compatible with Lampa 3.x
  */
 (function () {
     'use strict';
 
-    if (window.__qobuz_lampa_loaded) return;
-    window.__qobuz_lampa_loaded = true;
+    if (window.qobuz_lampa_plugin) return;
+    window.qobuz_lampa_plugin = true;
 
-    var VERSION = '0.1.0';
-    var STORE = 'qobuz_lampa_settings';
-
-    var settings = {
-        apiBase: Lampa.Storage.get(STORE, {
-            apiBase: 'https://www.qobuz.com/api.json/0.2',
-            appId: '',
-            userAuthToken: ''
-        })
+    var manifest = {
+        type: 'audio',
+        version: '0.1.1',
+        name: 'Qobuz',
+        description: 'Qobuz: поиск альбомов, исполнителей и треков',
+        component: 'qobuz_lampa'
     };
 
-    function save() {
-        Lampa.Storage.set(STORE, settings.apiBase);
+    var STORAGE = 'qobuz_lampa_settings';
+    var defaults = {
+        apiBase: 'https://www.qobuz.com/api.json/0.2',
+        appId: '',
+        userAuthToken: ''
+    };
+
+    function getSettings() {
+        var s = Lampa.Storage.get(STORAGE, {});
+        return $.extend({}, defaults, s || {});
     }
 
-    function esc(s) {
-        return $('<div>').text(s == null ? '' : String(s)).html();
+    function saveSettings(s) {
+        Lampa.Storage.set(STORAGE, s);
     }
 
-    function request(path, data, done, fail) {
-        var url = settings.apiBase.replace(/\/$/, '') + '/' + path.replace(/^\//, '');
+    function esc(v) {
+        return $('<div>').text(v == null ? '' : String(v)).html();
+    }
+
+    function cover(v) {
+        if (!v) return '';
+        return String(v).replace(/\{size\}/g, '600');
+    }
+
+    function duration(sec) {
+        sec = parseInt(sec || 0, 10);
+        if (!sec) return '';
+        return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+    }
+
+    function registerManifest() {
+        try {
+            Lampa.Manifest = Lampa.Manifest || {};
+            Lampa.Manifest.plugins = manifest;
+        } catch (e) {
+            console.log('[Qobuz] manifest error', e);
+        }
+    }
+
+    function style() {
+        if ($('#qobuz-lampa-css').length) return;
+
+        $('<style id="qobuz-lampa-css">' +
+            '.qobuz-page{padding:2em;box-sizing:border-box;min-height:100%;}' +
+            '.qobuz-search{display:flex;gap:1em;margin-bottom:2em;}' +
+            '.qobuz-input{width:100%;box-sizing:border-box;padding:.8em 1em;border:0;border-radius:.5em;background:rgba(255,255,255,.1);color:inherit;font-size:1em;outline:0;}' +
+            '.qobuz-search .qobuz-input{flex:1;}' +
+            '.qobuz-btn{padding:.8em 1.4em;border-radius:.5em;background:rgba(255,255,255,.12);cursor:pointer;}' +
+            '.qobuz-title{font-size:2em;font-weight:bold;margin-bottom:1em;}' +
+            '.qobuz-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11em,1fr));gap:1.2em;}' +
+            '.qobuz-card{min-width:0;}' +
+            '.qobuz-cover{width:100%;aspect-ratio:1;background:rgba(255,255,255,.08);border-radius:.5em;overflow:hidden;}' +
+            '.qobuz-cover img{width:100%;height:100%;object-fit:cover;display:block;}' +
+            '.qobuz-name{font-weight:bold;margin-top:.55em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+            '.qobuz-sub{opacity:.6;margin-top:.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+            '.qobuz-row{display:flex;align-items:center;gap:1em;padding:.9em;border-radius:.4em;}' +
+            '.qobuz-row.focus,.qobuz-row:hover{background:rgba(255,255,255,.1);}' +
+            '.qobuz-num{width:2em;opacity:.5;text-align:center;}' +
+            '.qobuz-track{flex:1;}.qobuz-time{opacity:.5;}' +
+            '.qobuz-head{display:flex;gap:2em;align-items:center;margin-bottom:2em;}' +
+            '.qobuz-head img{width:12em;height:12em;object-fit:cover;border-radius:.5em;}' +
+            '.qobuz-head h2{margin:0 0 .5em;font-size:2em;}' +
+            '.qobuz-message{padding:3em;text-align:center;opacity:.7;}' +
+        '</style>').appendTo('head');
+    }
+
+    function api(path, data, success, error) {
+        var s = getSettings();
+        var url = s.apiBase.replace(/\/$/, '') + '/' + path.replace(/^\//, '');
         var params = $.extend({}, data || {});
-        if (settings.apiBase.appId) params.app_id = settings.apiBase.appId;
-        if (settings.apiBase.userAuthToken) params.user_auth_token = settings.apiBase.userAuthToken;
+
+        if (s.appId) params.app_id = s.appId;
+        if (s.userAuthToken) params.user_auth_token = s.userAuthToken;
 
         $.ajax({
             url: url,
             data: params,
             dataType: 'json',
-            timeout: 15000,
-            success: done,
-            error: function (xhr) {
-                if (fail) fail(xhr);
-                else Lampa.Noty.show('Qobuz: ошибка запроса');
+            timeout: 20000,
+            success: success,
+            error: error || function () {
+                Lampa.Noty.show('Qobuz: ошибка запроса');
             }
         });
     }
 
-    function img(url) {
-        return url || '';
+    function imageOf(x) {
+        return cover(
+            x.image ||
+            x.image_url ||
+            x.cover ||
+            (x.album && (x.album.image || x.album.image_url || x.album.cover)) ||
+            ''
+        );
     }
 
-    function cardTemplate(item) {
-        var title = item.title || item.name || '';
-        var sub = item.artist && item.artist.name ? item.artist.name : (item.subtitle || '');
-        var cover = item.image || item.cover || item.image_url || '';
-
-        return $('<div class="qobuz-card selector">' +
-            '<div class="qobuz-card__cover">' +
-                (cover ? '<img src="' + esc(cover) + '">' : '<div class="qobuz-card__empty">♫</div>') +
-            '</div>' +
-            '<div class="qobuz-card__title">' + esc(title) + '</div>' +
-            '<div class="qobuz-card__sub">' + esc(sub) + '</div>' +
-        '</div>');
-    }
-
-    function normalizeImage(item) {
-        var u = item.image || item.cover || item.image_url;
-        if (!u && item.album) u = item.album.image || item.album.cover;
-        if (typeof u === 'string') return u.replace(/\{size\}/g, '600');
-        return '';
-    }
-
-    function normalizeSearch(data) {
-        var out = [];
-        ['tracks', 'albums', 'artists'].forEach(function (key) {
-            var block = data && data[key];
-            var list = block && (block.items || block);
-            if (!Array.isArray(list)) return;
-            list.forEach(function (x) {
-                x.image = normalizeImage(x);
-                x.__type = key.slice(0, -1);
-                out.push(x);
-            });
-        });
-        return out;
-    }
-
-    function QobuzHome(object) {
+    function SearchComponent(object) {
         var self = this;
-        var activity = $('<div class="qobuz-page qobuz-home"></div>');
-        var search = $('<div class="qobuz-search"><input class="qobuz-input" placeholder="Поиск Qobuz..."><button class="qobuz-button selector">Найти</button></div>');
-        var content = $('<div class="qobuz-content"></div>');
-        var input = search.find('input');
+        var root = $('<div class="qobuz-page"></div>');
+        var input = $('<input class="qobuz-input" placeholder="Поиск Qobuz...">');
+        var button = $('<div class="qobuz-btn selector">Найти</div>');
+        var search = $('<div class="qobuz-search"></div>').append(input, button);
+        var body = $('<div></div>');
 
         this.create = function () {
-            activity.append(search, content);
-            object.activity.append(activity);
+            root.append(search, body);
+            object.activity.append(root);
 
-            search.find('button').on('click', function () {
-                self.search(input.val());
+            button.on('hover:enter click', function () {
+                self.find(input.val());
             });
 
             input.on('keydown', function (e) {
-                if (e.keyCode === 13) self.search(input.val());
+                if (e.keyCode === 13) self.find(input.val());
             });
 
-            self.render();
+            setTimeout(function () {
+                try { input.focus(); } catch (e) {}
+            }, 100);
+
+            this.start();
         };
 
-        this.render = function () {
-            content.html(
+        this.start = function () {
+            body.html(
                 '<div class="qobuz-title">Qobuz</div>' +
-                '<div class="qobuz-hint">Поиск альбомов, исполнителей и треков</div>'
+                '<div class="qobuz-message">Введите название исполнителя, альбома или трека.</div>'
             );
         };
 
-        this.search = function (query) {
-            query = String(query || '').trim();
-            if (!query) return;
+        this.find = function (q) {
+            q = String(q || '').trim();
+            if (!q) return;
 
-            content.html('<div class="qobuz-loading">Поиск…</div>');
+            body.html('<div class="qobuz-message">Поиск…</div>');
 
-            request('search', {
-                query: query,
-                limit: 50,
-                offset: 0
-            }, function (data) {
-                self.showResults(normalizeSearch(data));
-            }, function () {
-                content.html('<div class="qobuz-error">Не удалось выполнить поиск.</div>');
+            api('search', { query: q, limit: 50, offset: 0 }, function (data) {
+                self.results(data);
             });
         };
 
-        this.showResults = function (items) {
-            content.empty();
+        this.results = function (data) {
+            body.empty();
 
-            if (!items.length) {
-                content.html('<div class="qobuz-error">Ничего не найдено.</div>');
-                return;
-            }
+            var sections = [
+                {key:'albums', title:'Альбомы'},
+                {key:'artists', title:'Исполнители'},
+                {key:'tracks', title:'Треки'}
+            ];
 
-            var grid = $('<div class="qobuz-grid"></div>');
-            items.forEach(function (item) {
-                var card = cardTemplate(item);
-                card.on('click', function () {
-                    if (item.__type === 'album') self.album(item);
-                    else if (item.__type === 'artist') self.artist(item);
-                    else self.track(item);
+            var found = false;
+
+            sections.forEach(function (section) {
+                var block = data && data[section.key];
+                var items = block && (block.items || block);
+                if (!Array.isArray(items) || !items.length) return;
+
+                found = true;
+                body.append('<div class="qobuz-title">' + section.title + '</div>');
+
+                var grid = $('<div class="qobuz-grid"></div>');
+
+                items.forEach(function (item) {
+                    var c = $('<div class="qobuz-card selector">' +
+                        '<div class="qobuz-cover">' +
+                        (imageOf(item) ? '<img src="' + esc(imageOf(item)) + '">' : '') +
+                        '</div>' +
+                        '<div class="qobuz-name">' + esc(item.title || item.name || '') + '</div>' +
+                        '<div class="qobuz-sub">' +
+                        esc(item.artist && item.artist.name || '') +
+                        '</div></div>');
+
+                    c.on('hover:enter click', function () {
+                        if (section.key === 'albums') self.album(item);
+                        else if (section.key === 'artists') self.artist(item);
+                        else self.play(item);
+                    });
+
+                    grid.append(c);
                 });
-                grid.append(card);
+
+                body.append(grid);
             });
-            content.append(grid);
+
+            if (!found) body.html('<div class="qobuz-message">Ничего не найдено.</div>');
         };
 
         this.album = function (item) {
-            var id = item.id;
-            content.html('<div class="qobuz-loading">Загрузка альбома…</div>');
+            body.html('<div class="qobuz-message">Загрузка альбома…</div>');
 
-            request('album/get', { album_id: id }, function (data) {
-                var album = data;
-                var tracks = album.tracks && (album.tracks.items || album.tracks) || [];
+            api('album/get', {album_id:item.id}, function (album) {
+                body.empty();
 
-                var html = '<div class="qobuz-detail">' +
-                    '<div class="qobuz-detail__head">' +
-                    '<img src="' + esc(normalizeImage(album)) + '">' +
-                    '<div><h2>' + esc(album.title) + '</h2>' +
+                var head = $('<div class="qobuz-head">' +
+                    (imageOf(album) ? '<img src="' + esc(imageOf(album)) + '">' : '') +
+                    '<div><h2>' + esc(album.title || '') + '</h2>' +
                     '<div>' + esc(album.artist && album.artist.name || '') + '</div></div>' +
-                    '</div><div class="qobuz-tracks"></div></div>';
-
-                content.html(html);
-                var list = content.find('.qobuz-tracks');
-
-                tracks.forEach(function (track, i) {
-                    var row = $('<div class="qobuz-track selector">' +
-                        '<span class="qobuz-track__num">' + (i + 1) + '</span>' +
-                        '<span class="qobuz-track__title">' + esc(track.title) + '</span>' +
-                        '<span class="qobuz-track__duration">' + formatDuration(track.duration) + '</span>' +
                     '</div>');
+                body.append(head);
 
-                    row.on('click', function () {
-                        self.track($.extend({}, track, {
-                            album: album,
-                            image: normalizeImage(album)
-                        }));
+                var tracks = album.tracks && (album.tracks.items || album.tracks) || [];
+                tracks.forEach(function (track, i) {
+                    var row = $('<div class="qobuz-row selector">' +
+                        '<div class="qobuz-num">' + (i + 1) + '</div>' +
+                        '<div class="qobuz-track">' + esc(track.title || '') + '</div>' +
+                        '<div class="qobuz-time">' + duration(track.duration) + '</div>' +
+                        '</div>');
+
+                    row.on('hover:enter click', function () {
+                        self.play($.extend({}, track, {album:album}));
                     });
 
-                    list.append(row);
+                    body.append(row);
                 });
             });
         };
 
         this.artist = function (item) {
-            content.html('<div class="qobuz-loading">Загрузка исполнителя…</div>');
-            request('artist/get', { artist_id: item.id }, function (data) {
-                var albums = data.albums && (data.albums.items || data.albums) || [];
+            body.html('<div class="qobuz-message">Загрузка исполнителя…</div>');
+
+            api('artist/get', {artist_id:item.id}, function (artist) {
+                body.empty();
+                body.append('<div class="qobuz-title">' + esc(artist.name || item.name) + '</div>');
+
+                var albums = artist.albums && (artist.albums.items || artist.albums) || [];
                 var grid = $('<div class="qobuz-grid"></div>');
-                content.html('<div class="qobuz-title">' + esc(data.name || item.name) + '</div>').append(grid);
+
                 albums.forEach(function (album) {
-                    album.image = normalizeImage(album);
-                    var card = cardTemplate(album);
-                    card.on('click', function () { self.album(album); });
-                    grid.append(card);
+                    var c = $('<div class="qobuz-card selector">' +
+                        '<div class="qobuz-cover">' +
+                        (imageOf(album) ? '<img src="' + esc(imageOf(album)) + '">' : '') +
+                        '</div>' +
+                        '<div class="qobuz-name">' + esc(album.title || '') + '</div>' +
+                        '</div>');
+
+                    c.on('hover:enter click', function () {
+                        self.album(album);
+                    });
+
+                    grid.append(c);
                 });
+
+                body.append(grid);
             });
         };
 
-        this.track = function (track) {
-            var title = track.title || '';
-            var artist = track.artist && track.artist.name || '';
-            var album = track.album && track.album.title || '';
+        this.play = function (track) {
+            var s = getSettings();
 
-            // Qobuz does not expose a universally usable public stream endpoint
-            // without valid account/app authentication. Try track/getFileUrl only
-            // when the user has configured app_id + user_auth_token.
-            if (!settings.apiBase.appId || !settings.apiBase.userAuthToken) {
+            if (!s.appId || !s.userAuthToken) {
                 Lampa.Modal.open({
                     title: 'Qobuz',
-                    html: '<div style="padding:1em">' +
-                        '<p><b>' + esc(title) + '</b></p>' +
-                        '<p>Для воспроизведения настройте Qobuz App ID и User Auth Token в настройках плагина.</p>' +
-                        '<p>Каталог и поиск могут работать без этих параметров только если используемый API endpoint разрешает это.</p>' +
+                    html:'<div style="padding:1.5em">' +
+                        '<p><b>' + esc(track.title || '') + '</b></p>' +
+                        '<p>Для получения потока Qobuz нужны App ID и User Auth Token.</p>' +
                         '</div>',
-                    buttons: [
-                        { title: 'Настройки', onSelect: function () { self.settings(); } },
-                        { title: 'Закрыть' }
+                    buttons:[
+                        {title:'Закрыть'}
                     ]
                 });
                 return;
             }
 
-            request('track/getFileUrl', {
-                track_id: track.id,
-                format_id: 27
+            api('track/getFileUrl', {
+                track_id:track.id,
+                format_id:27
             }, function (data) {
                 if (!data || !data.url) {
-                    Lampa.Noty.show('Qobuz: URL потока не получен');
+                    Lampa.Noty.show('Qobuz: поток не получен');
                     return;
                 }
 
                 Lampa.Player.play({
-                    url: data.url,
-                    title: title,
-                    quality: 'auto',
-                    playlist: [{
-                        url: data.url,
-                        title: title,
-                        artist: artist,
-                        album: album
-                    }]
+                    url:data.url,
+                    title:track.title || '',
+                    quality:'auto'
                 });
-            });
-        };
-
-        this.settings = function () {
-            Lampa.Modal.open({
-                title: 'Qobuz — настройки',
-                html: '<div class="qobuz-settings">' +
-                    '<input class="qobuz-input qobuz-appid" placeholder="Qobuz App ID" value="' + esc(settings.apiBase.appId || '') + '">' +
-                    '<input class="qobuz-input qobuz-token" placeholder="User Auth Token" value="' + esc(settings.apiBase.userAuthToken || '') + '">' +
-                    '</div>',
-                buttons: [{
-                    title: 'Сохранить',
-                    onSelect: function (modal) {
-                        var root = $(modal);
-                        settings.apiBase.appId = root.find('.qobuz-appid').val().trim();
-                        settings.apiBase.userAuthToken = root.find('.qobuz-token').val().trim();
-                        save();
-                        Lampa.Noty.show('Qobuz: сохранено');
-                    }
-                }, { title: 'Отмена' }]
             });
         };
 
@@ -281,83 +302,93 @@
         };
 
         this.destroy = function () {
-            activity.remove();
+            root.remove();
         };
-
-        this.start = this.create;
     }
 
-    function formatDuration(sec) {
-        sec = parseInt(sec || 0, 10);
-        if (!sec) return '';
-        var m = Math.floor(sec / 60);
-        var s = sec % 60;
-        return m + ':' + (s < 10 ? '0' : '') + s;
-    }
+    function addMenu() {
+        if (window.qobuz_lampa_menu_added) return;
+        window.qobuz_lampa_menu_added = true;
 
-    function addStyles() {
-        if ($('#qobuz-lampa-style').length) return;
+        var svg = '<svg width="24" height="24" viewBox="0 0 24 24">' +
+            '<path fill="currentColor" d="M12 3v10.2a3.5 3.5 0 1 0 2 3.15V8h5V3h-7z"/>' +
+            '</svg>';
 
-        $('<style id="qobuz-lampa-style">' +
-            '.qobuz-page{padding:2em;box-sizing:border-box;min-height:100%;font-family:inherit}' +
-            '.qobuz-search{display:flex;gap:1em;margin-bottom:2em}' +
-            '.qobuz-input{background:#292b2c;color:#fff;border:1px solid #555;border-radius:.4em;padding:.8em 1em;font-size:1.1em;outline:none;box-sizing:border-box}' +
-            '.qobuz-search .qobuz-input{flex:1}' +
-            '.qobuz-button{border:0;border-radius:.4em;padding:.8em 1.5em;background:#fff;color:#111;font-weight:bold}' +
-            '.qobuz-title{font-size:2em;font-weight:bold;margin-bottom:.4em}' +
-            '.qobuz-hint{opacity:.6;margin-bottom:2em}' +
-            '.qobuz-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(10em,1fr));gap:1.2em}' +
-            '.qobuz-card{min-width:0;cursor:pointer}' +
-            '.qobuz-card__cover{aspect-ratio:1/1;background:#292b2c;border-radius:.5em;overflow:hidden}' +
-            '.qobuz-card__cover img{width:100%;height:100%;object-fit:cover}' +
-            '.qobuz-card__empty{height:100%;display:flex;align-items:center;justify-content:center;font-size:3em;opacity:.4}' +
-            '.qobuz-card__title{font-weight:bold;margin-top:.6em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-            '.qobuz-card__sub{opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.25em}' +
-            '.qobuz-detail__head{display:flex;gap:2em;align-items:center;margin-bottom:2em}' +
-            '.qobuz-detail__head img{width:12em;height:12em;object-fit:cover;border-radius:.5em}' +
-            '.qobuz-detail__head h2{font-size:2em;margin:0 0 .5em}' +
-            '.qobuz-track{display:flex;gap:1em;padding:1em;border-radius:.4em;cursor:pointer}' +
-            '.qobuz-track:hover,.qobuz-track.focus{background:#292b2c}' +
-            '.qobuz-track__num{width:2em;opacity:.5}.qobuz-track__title{flex:1}.qobuz-track__duration{opacity:.5}' +
-            '.qobuz-loading,.qobuz-error{padding:3em;text-align:center;opacity:.7}' +
-            '.qobuz-settings{display:flex;flex-direction:column;gap:1em;padding:1em}' +
-        '</style>').appendTo('head');
-    }
+        try {
+            if (Lampa.Menu && Lampa.Menu.addButton) {
+                var b = Lampa.Menu.addButton(svg, 'Qobuz', function () {
+                    openQobuz();
+                });
 
-    function register() {
-        if (!window.Lampa) return;
-
-        addStyles();
-
-        if (Lampa.Component && Lampa.Component.add) {
-            Lampa.Component.add('qobuz_lampa', QobuzHome);
-        }
-
-        // Lampa 3.x menu API.
-        if (Lampa.Menu && Lampa.Menu.addButton) {
-            Lampa.Menu.addButton(
-                '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 3v10.2a3.5 3.5 0 1 0 2 3.15V8h5V3h-7z"/></svg>',
-                'Qobuz',
-                function () {
-                    Lampa.Activity.push({
-                        url: '',
-                        title: 'Qobuz',
-                        component: 'qobuz_lampa'
-                    });
-                }
-            );
-        }
-
-        console.log('[Qobuz Lampa] loaded v' + VERSION);
-    }
-
-    if (window.Lampa) register();
-    else {
-        var timer = setInterval(function () {
-            if (window.Lampa) {
-                clearInterval(timer);
-                register();
+                if (b && b.addClass) b.addClass('qobuz-menu-button');
+                console.log('[Qobuz] menu button added');
+                return;
             }
-        }, 100);
+        } catch (e) {
+            console.log('[Qobuz] addButton error', e);
+        }
+
+        try {
+            if (Lampa.Menu && Lampa.Menu.addaddElement) {
+                var el = document.createElement('div');
+                el.className = 'menu__item selector qobuz-menu-button';
+                el.innerHTML = '<span class="menu__ico">' + svg + '</span><span class="menu__text">Qobuz</span>';
+                Lampa.Menu.addaddElement(el, openQobuz);
+                console.log('[Qobuz] menu element added');
+            }
+        } catch (e) {
+            console.log('[Qobuz] addaddElement error', e);
+        }
     }
+
+    function openQobuz() {
+        Lampa.Activity.push({
+            url:'',
+            title:'Qobuz',
+            component:'qobuz_lampa',
+            page:1
+        });
+    }
+
+    function start() {
+        if (window.qobuz_lampa_started) return;
+        window.qobuz_lampa_started = true;
+
+        try {
+            style();
+            registerManifest();
+            Lampa.Component.add('qobuz_lampa', SearchComponent);
+            addMenu();
+            console.log('[Qobuz] started 0.1.1');
+        } catch (e) {
+            console.error('[Qobuz] start error', e);
+            if (Lampa.Noty) Lampa.Noty.show('Qobuz: ошибка загрузки');
+        }
+    }
+
+    function bootstrap() {
+        if (typeof Lampa === 'undefined') {
+            setTimeout(bootstrap, 250);
+            return;
+        }
+
+        if (window.appready) {
+            start();
+            return;
+        }
+
+        if (Lampa.Listener && Lampa.Listener.follow) {
+            Lampa.Listener.follow('app', function (e) {
+                if (e.type === 'ready') start();
+            });
+
+            setTimeout(function () {
+                if (window.appready) start();
+            }, 1500);
+        } else {
+            setTimeout(start, 1000);
+        }
+    }
+
+    bootstrap();
 })();
