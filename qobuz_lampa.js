@@ -123,7 +123,7 @@
 
         this.create = function () {
             root.append(search, body);
-            object.activity.append(root);
+            $(object.activity).append(root);
 
             button.on('hover:enter click', function () {
                 self.find(input.val());
